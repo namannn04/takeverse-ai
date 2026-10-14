@@ -41,17 +41,23 @@ export function createStore(path = 'data/takeverse.db') {
       JSON.stringify({
         sessionId: s.id,
         state: s.state,
+        performance: s.performance,
         version: s.version,
         label,
       }),
     );
   };
-  const create = (story: Story, state: State = initial(story)) =>
+  const create = (
+    story: Story,
+    state: State = initial(story),
+    performance?: Session['performance'],
+  ) =>
     db.transaction(() => {
       const s = write({
         id: randomUUID(),
         story: structuredClone(story),
         state: structuredClone(state),
+        ...(performance ? { performance: structuredClone(performance) } : {}),
         version: 0,
         updated: new Date().toISOString(),
       });
@@ -140,7 +146,8 @@ export function createStore(path = 'data/takeverse.db') {
         .prepare('SELECT body FROM checkpoints WHERE id=? AND sessionId=?')
         .get(checkpointId, id) as { body: string } | undefined;
       if (!row) throw new Error('Checkpoint not found');
-      return create(s.story, JSON.parse(row.body).state);
+      const saved = JSON.parse(row.body) as Checkpoint;
+      return create(s.story, saved.state, saved.performance);
     },
   };
 }

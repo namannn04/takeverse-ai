@@ -91,6 +91,7 @@ export type Session = {
 export type Checkpoint = {
   id: number;
   sessionId: string;
+  performance?: Session['performance'];
   state: State;
   version: number;
   label: string;

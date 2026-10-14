@@ -131,3 +131,25 @@ test('each starter story validates and all of its endings are reachable', () => 
     assert.equal(endings.size, 3);
   }
 });
+
+test('forking a custom-response checkpoint preserves its exact character performance', () => {
+  const store = createStore(':memory:');
+  try {
+    const s = store.create(story);
+    const lines = [
+      {
+        character: 'mara',
+        text: 'I remember what you just promised.',
+        direction: 'warmly',
+      },
+    ];
+    store.remember(s.id, 0, 'I promise to stay.', lines);
+    const checkpoint = store.checkpoints(s.id)[0];
+    store.choose(s.id, 1, 'honest');
+    const fork = store.fork(s.id, checkpoint.id);
+    assert.deepEqual(fork.performance?.lines, lines);
+    assert.equal(store.getSession(s.id).state.node, 'evidence');
+  } finally {
+    store.db.close();
+  }
+});
