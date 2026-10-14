@@ -1,52 +1,1579 @@
-import React,{useState,useEffect,useRef} from 'react';
-import {createRoot} from 'react-dom/client';
-import {ArrowUpRight,ArrowRight,BookOpen,Clapperboard,Compass,GitBranch,Headphones,Play,Plus,Settings,Volume2,Pause,Check,ChevronLeft,Bookmark,Clock,Search,X,Send,Download,Upload,Film,Users,Save,RotateCcw,Loader2} from 'lucide-react';
-import type {Story,Session,Checkpoint,Line} from '../shared/schema';
-import {available} from '../server/engine';
+import React, { useState, useEffect, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  ArrowUpRight,
+  ArrowRight,
+  BookOpen,
+  Clapperboard,
+  Compass,
+  GitBranch,
+  Headphones,
+  Play,
+  Plus,
+  Settings,
+  Volume2,
+  Pause,
+  Check,
+  ChevronLeft,
+  Bookmark,
+  Clock,
+  Search,
+  X,
+  Send,
+  Download,
+  Upload,
+  Film,
+  Users,
+  Save,
+  RotateCcw,
+  Loader2,
+} from 'lucide-react';
+import type { Story, Session, Checkpoint, Line } from '../shared/schema';
+import { available, performanceLines } from '../server/engine';
 import './style.css';
-async function api<T>(url:string,method='GET',body?:unknown):Promise<T>{const res=await fetch('/api'+url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!res.ok){const data=await res.json();throw new Error(data.error??'Request failed');}return res.json();}
-const images={coast:'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1800&q=85',city:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=1000&q=85',forest:'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1000&q=85'};
-const heroImage='https://images.unsplash.com/photo-1484291470158-2a3f8b56c3f4?auto=format&fit=crop&w=2000&q=85';
-function App(){
- const [page,setPage]=useState('library'),[stories,setStories]=useState<Story[]>([]),[sessions,setSessions]=useState<Session[]>([]),[session,setSession]=useState<Session|null>(null),[status,setStatus]=useState({fish:false,director:false,model:'drama-3'}),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[settings,setSettings]=useState(false),[filter,setFilter]=useState('All stories'),[search,setSearch]=useState(''),[checkpoints,setCheckpoints]=useState<Checkpoint[]>([]),[history,setHistory]=useState(false),[custom,setCustom]=useState(''),[playing,setPlaying]=useState<number|null>(null),[audioLoading,setAudioLoading]=useState<number|null>(null),[edit,setEdit]=useState<Story|null>(null),[sceneId,setSceneId]=useState(''),[studioTab,setStudioTab]=useState('Scenes');
- const audio=useRef<HTMLAudioElement|null>(null),audioUrl=useRef(''),audioGeneration=useRef(0);
- const refresh=async()=>{const [st,se,pr]=await Promise.all([api<Story[]>('/stories'),api<Session[]>('/sessions'),api<typeof status>('/status')]);setStories(st);setSessions(se);setStatus(pr);};
- useEffect(()=>{refresh().catch(e=>setError(e.message));return()=>{audio.current?.pause();if(audioUrl.current)URL.revokeObjectURL(audioUrl.current);};},[]);
- useEffect(()=>{const t=setTimeout(()=>setNotice(''),3500);return()=>clearTimeout(t);},[notice]);
- function stopAudio(){audioGeneration.current++;audio.current?.pause();audio.current=null;if(audioUrl.current)URL.revokeObjectURL(audioUrl.current);audioUrl.current='';setPlaying(null);setAudioLoading(null);}
- async function run(work:()=>Promise<void>){setBusy(true);setError('');try{await work();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- const start=(story:Story)=>run(async()=>{stopAudio();setSession(await api<Session>('/sessions','POST',{storyId:story.id}));setPage('player');await refresh();});
- const resume=(s:Session)=>{stopAudio();setSession(s);setPage('player');};
- const choose=(id:string)=>run(async()=>{if(!session)return;stopAudio();setSession(await api<Session>(`/sessions/${session.id}/choices`,'POST',{version:session.version,choiceId:id}));setCustom('');await refresh();});
- const save=()=>run(async()=>{if(!session)return;setSession(await api<Session>(`/sessions/${session.id}/save`,'POST',{version:session.version}));setNotice('Checkpoint saved. Your story will be here.');await refresh();});
- async function playLine(i:number){if(!session)return;if(playing===i){stopAudio();return;}stopAudio();const generation=audioGeneration.current;setAudioLoading(i);setError('');try{const res=await fetch(`/api/sessions/${session.id}/audio`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lineIndex:i})});if(!res.ok)throw new Error((await res.json()).error);const blob=await res.blob();if(generation!==audioGeneration.current)return;audioUrl.current=URL.createObjectURL(blob);audio.current=new Audio(audioUrl.current);audio.current.onended=()=>setPlaying(null);await audio.current.play();setPlaying(i);}catch(e){if(generation===audioGeneration.current)setError((e as Error).message);}finally{if(generation===audioGeneration.current)setAudioLoading(null);}}
- const showHistory=()=>run(async()=>{if(!session)return;setCheckpoints(await api<Checkpoint[]>(`/sessions/${session.id}/checkpoints`));setHistory(true);});
- const fork=(c:Checkpoint)=>run(async()=>{if(!session)return;stopAudio();setSession(await api<Session>(`/sessions/${session.id}/fork`,'POST',{checkpointId:c.id}));setHistory(false);setNotice('A new branch begins. Your original playthrough is preserved.');await refresh();});
- const send=()=>run(async()=>{if(!session||!custom.trim())return;stopAudio();const result=await api<{session:Session;lines:Line[]}>(`/sessions/${session.id}/direct`,'POST',{version:session.version,text:custom});setSession(result.session);setCustom('');await refresh();});
- const openEditor=(story?:Story)=>{setEdit(story?structuredClone(story):{id:'story-'+crypto.randomUUID().slice(0,8),title:'An untold story',genre:'Drama',synopsis:'Every story starts with a choice.',art:'forest',duration:'10 min',start:'opening',characters:[{id:'character-1',name:'The stranger',role:'An unexpected arrival',personality:'Curious, guarded, quietly hopeful.',voiceId:''}],scenes:[{id:'opening',title:'The beginning',location:'Somewhere · after midnight',prose:'Someone knocks. You were not expecting anyone.',lines:[{character:'character-1',text:'I thought you might still be awake.',direction:'softly, uncertain'}],choices:[],ending:'To be continued'}]});setSceneId(story?.start??'opening');setPage('studio');};
- const saveStory=()=>run(async()=>{if(!edit)return;const result=await api<Story>(`/stories/${edit.id}`,'PUT',edit);setEdit(result);await refresh();setNotice('Story validated and saved.');});
- const testStory=()=>run(async()=>{if(!edit)return;await api(`/stories/${edit.id}`,'PUT',edit);await refresh();stopAudio();setSession(await api<Session>('/sessions','POST',{storyId:edit.id}));setPage('player');});
- function updateScene(patch:Partial<Story['scenes'][number]>){setEdit(s=>s?{...s,scenes:s.scenes.map(n=>n.id===sceneId?{...n,...patch}:n)}:s);}
- const scene=session?.story.scenes.find(n=>n.id===session.state.node),editingScene=edit?.scenes.find(n=>n.id===sceneId);
- const lines=session&&scene?(session.performance?.node===scene.id?session.performance.lines:scene.lines):[];
- const navigate=(p:string)=>{stopAudio();setPage(p);setError('');};
- return <div className="app"><aside className="sidebar"><a className="brand" href="#" onClick={e=>{e.preventDefault();navigate('library');}}><span className="brand-symbol">t<span>v</span></span>takeverse<span className="brand-dot">®</span></a><div className="workspace-label">YOUR NEXT CHAPTER</div><nav><button className={page==='library'?'active':''} onClick={()=>navigate('library')}><Compass size={19}/>Discover<span>01</span></button><button className={page==='saves'?'active':''} onClick={()=>navigate('saves')}><BookOpen size={19}/>My stories<span>{sessions.length.toString().padStart(2,'0')}</span></button><button className={page==='studio'?'active':''} onClick={()=>openEditor(stories.find(s=>s.id===edit?.id))}><Clapperboard size={19}/>Creator Studio<ArrowUpRight size={15}/></button></nav><div className="sidebar-bottom"><div className="sound-card"><div className="sound-wave">▂ ▅ ▃ █ ▅ ▂ ▆ ▃</div><b>Made to be heard.</b><p>Every voice. Every silence.<br/>Part of your story.</p><span>POWERED BY FISH AUDIO</span></div><button className="settings" onClick={()=>setSettings(true)}><Settings size={18}/>Settings & connections</button><div className="profile"><span className="avatar">N</span><div>My workspace<small>Local storyteller</small></div><span className="online"/></div></div></aside>
- <div className="main"><header className="topbar"><div><span className="breadcrumb">THE INTERACTIVE STORY ENGINE</span><span className="header-divider"/>Your choices leave a mark.</div><button className="connection" onClick={()=>setSettings(true)}><span className={status.fish?'online':'offline'}/>{status.fish?'Fish Audio connected':'Connect Fish Audio'}<ArrowUpRight size={13}/></button></header>
- {error&&<div className="alert" role="alert"><span>{error}</span><button onClick={()=>setError('')} aria-label="Dismiss error"><X size={16}/></button></div>}{notice&&<div className="toast" role="status"><Check size={16}/>{notice}</div>}
- {page==='library'&&<main className="library"><div className="page-heading"><div><span className="eyebrow">A WORLD BEYOND WATCHING</span><h1>Find your next <em>what if.</em></h1><p>Step inside a story. Change what happens next.</p></div><span className="edition">THE TAKEVERSE COLLECTION<br/><b>VOL. 001 — OCTOBER 2026</b></span></div>
- <section className="hero" style={{backgroundImage:`linear-gradient(90deg,rgba(7,17,17,.9),rgba(7,17,17,.3)),linear-gradient(0deg,#071111aa,transparent),url(${heroImage})`}}><div className="hero-top"><span className="pill"><span/>THE FEATURED EXPERIENCE</span><span className="hero-number">01 / 03</span></div><div className="hero-content"><div className="hero-meta">MYSTERY <i/> CHOICE-DRIVEN <i/> 3 ENDINGS</div><h2>The Last<br/><em>Light</em><span>.</span></h2><p>The lighthouse went dark seven years ago.<br/>Tonight, it’s calling your name.</p><div className="hero-actions"><button className="primary" disabled={busy||!stories[0]} onClick={()=>start(stories[0])}><Play size={15} fill="currentColor"/>Enter the story<ArrowUpRight size={17}/></button><span><Headphones size={16}/> Best experienced with headphones</span></div></div><div className="hero-bottom"><span>BLACKWATER COAST · 11:32 PM</span><span>AN ORIGINAL TAKEVERSE STORY <ArrowUpRight size={14}/></span></div><div className="vertical-caption">EVERY TRUTH CASTS A SHADOW</div></section>
- <div className="collection-heading"><div><span className="eyebrow">NOT JUST A STORY. YOUR STORY.</span><h2>Worlds waiting for you<span> {stories.length.toString().padStart(2,'0')}</span></h2></div><label className="search"><Search size={16}/><input aria-label="Search stories" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Find a story"/></label></div><div className="filters">{['All stories','Mystery','Sci-fi','Drama'].map(f=><button key={f} className={filter===f?'selected':''} onClick={()=>setFilter(f)}>{f}</button>)}<span><GitBranch size={14}/>One decision. A different world.</span></div>
- <div className="story-grid">{stories.filter(s=>(filter==='All stories'||s.genre===filter)&&`${s.title} ${s.synopsis}`.toLowerCase().includes(search.toLowerCase())).map((s,i)=><article className="story-card" key={s.id}><button className={'cover '+s.art} onClick={()=>start(s)} disabled={busy} style={{backgroundImage:`linear-gradient(0deg,rgba(0,0,0,.8),transparent 80%),url(${images[s.art]})`}} aria-label={'Play '+s.title}><span className="cover-tag">{s.genre.toUpperCase()}</span><span className="cover-index">0{i+1}</span><h3>{s.title}</h3><span className="cover-play"><Play size={18} fill="currentColor"/></span></button><div className="card-meta"><span><Clock size={13}/>{s.duration}</span><span><GitBranch size={13}/>{s.scenes.filter(n=>n.ending).length} endings</span><button onClick={()=>openEditor(s)} aria-label={'Edit '+s.title}><ArrowUpRight size={17}/></button></div><p>{s.synopsis}</p></article>)}</div>{stories.filter(s=>(filter==='All stories'||s.genre===filter)&&s.title.toLowerCase().includes(search.toLowerCase())).length===0&&<p className="empty">No stories here yet. Try another search, or create your own.</p>}
- <section className="create-banner"><span className="banner-icon"><Clapperboard size={30}/></span><div><span className="eyebrow">FROM WHAT IF TO WHAT’S NEXT</span><h3>Some worlds are waiting to be written.</h3><p>Build characters, direct their voices, and make every choice matter.</p></div><button className="outline" onClick={()=>openEditor()}>Open Creator Studio<ArrowUpRight size={16}/></button></section><footer><span>TAKEVERSE © 2026</span><span>THE STORY ONLY EXISTS BECAUSE YOU’RE HERE.</span><span>IMAGINE. CHOOSE. BECOME.</span></footer></main>}
- {page==='player'&&session&&scene&&<main className="player"><div className="player-toolbar"><button className="text-button" onClick={()=>navigate('library')}><ChevronLeft size={16}/>Story library</button><span>{session.story.title} <i>/</i> Chapter {session.state.memories.length+1}</span><div><button className="outline small" onClick={showHistory} disabled={busy}><GitBranch size={15}/>Your path</button><button className="outline small" onClick={save} disabled={busy}><Bookmark size={15}/>Save</button></div></div><section className={'scene-visual '+session.story.art} style={{backgroundImage:`linear-gradient(0deg,#111510,transparent 95%),url(${images[session.story.art]})`}}><div><span className="eyebrow">{scene.location.toUpperCase()}</span><h1>{scene.title}<em>.</em></h1><span className="pill">{scene.ending?'THE FINAL CHAPTER':'YOU ARE PART OF THIS STORY'}</span></div></section><div className="play-layout"><section className="narrative"><p className="prose">{scene.prose}</p>{session.state.memories.length>0&&<div className="remembered"><span className="online"/>Your choices are remembered: “{session.state.memories.at(-1)?.text}”</div>}<div className="dialogue">{lines.map((l,i)=><article key={session.state.node+'-'+i}><div className="speaker-avatar">{session.story.characters.find(c=>c.id===l.character)?.name[0]}</div><div><h4>{session.story.characters.find(c=>c.id===l.character)?.name}<span>{l.direction}</span></h4><p>“{l.text}”</p></div><button className="audio-button" aria-label={`Play dialogue ${i+1}`} onClick={()=>playLine(i)} disabled={audioLoading!==null}>{audioLoading===i?<Loader2 size={18} className="spin"/>:playing===i?<Pause size={18}/>:<Volume2 size={18}/>}</button></article>)}</div><div className="audio-note"><Headphones size={13}/>{status.fish?'Drama 3 · Generate a performance with the speaker button':'Text mode · Connect Fish Audio in Settings for voice performances'}</div>{scene.ending?<div className="ending"><span className="eyebrow">YOU REACHED AN ENDING</span><h2>{scene.ending}</h2><p>Every ending is a door to another version of the story.</p><button className="primary" onClick={showHistory}><RotateCcw size={16}/>Explore another path</button></div>:<><div className="choice-label"><span className="eyebrow">WHAT DO YOU DO?</span><span>Take your time. This matters.</span></div><div className="choices">{scene.choices.map((c,i)=><button key={c.id} disabled={busy||!available(session.state,c)} onClick={()=>choose(c.id)}><span>0{i+1}</span><div>{c.text}{!available(session.state,c)&&<small>{c.requires?'Requires an earlier discovery':'Requires greater trust'}</small>}</div><ArrowUpRight size={18}/></button>)}</div><form className="custom-response" onSubmit={e=>{e.preventDefault();send();}}><input value={custom} onChange={e=>setCustom(e.target.value)} maxLength={1000} placeholder={status.director?'Or say something in your own words…':'Custom responses require an AI director connection'} aria-label="Custom response" disabled={!status.director||busy}/><button aria-label="Send custom response" disabled={!custom.trim()||busy||!status.director}><Send size={17}/></button></form></>}</section><aside className="world-panel"><div className="panel-title"><Users size={16}/>THE PEOPLE AROUND YOU</div>{session.story.characters.map(c=><div className="relationship" key={c.id}><div><span className="speaker-avatar">{c.name[0]}</span><div><b>{c.name}</b><small>{c.role}</small></div></div><div className="trust-meta"><span>{session.state.trust[c.id]>=65?'Trusting':session.state.trust[c.id]<40?'Guarded':'Uncertain'}</span><span>{session.state.trust[c.id]} / 100</span></div><div className="trust-track"><span style={{width:session.state.trust[c.id]+'%'}}/></div></div>)}<div className="panel-title"><Search size={15}/>YOUR DISCOVERIES</div>{session.state.clues.length?session.state.clues.map(c=><p className="clue" key={c}><Check size={14}/>{c}</p>):<p className="muted">Some things are still waiting to be found.</p>}<div className="panel-title"><GitBranch size={15}/>WORLD MEMORY</div><p className="muted">{session.state.memories.length} remembered interactions · {session.state.flags.length} consequences</p><span className="local-badge"><span className="online"/>Autosaved locally</span></aside></div></main>}
- {page==='saves'&&<main className="library"><span className="eyebrow">EVERY PATH IS YOURS</span><h1>Your stories, <em>unfinished.</em></h1><p className="subtitle">Pick up where you left off. Each branch has its own memory.</p><div className="save-list">{sessions.map(s=><article key={s.id}><div className={'save-art '+s.story.art} style={{backgroundImage:`url(${images[s.story.art]})`}}/><div><span className="eyebrow">{s.story.genre} · {s.story.scenes.find(n=>n.id===s.state.node)?.ending?'COMPLETED':'IN PROGRESS'}</span><h2>{s.story.title}</h2><p>{s.story.scenes.find(n=>n.id===s.state.node)?.title} · {s.state.memories.length} memories</p><small>{new Date(s.updated).toLocaleString()} · Branch {s.id.slice(0,8)}</small></div><button className="primary" onClick={()=>resume(s)}>Resume<ArrowRight size={16}/></button></article>)}</div>{!sessions.length&&<div className="empty"><BookOpen size={36}/><h2>Your first chapter is waiting.</h2><p>Start a story from the library. Every decision is saved automatically.</p><button className="primary" onClick={()=>navigate('library')}>Discover stories<ArrowRight size={16}/></button></div>}</main>}
- {page==='studio'&&edit&&editingScene&&<main className="studio"><div className="studio-heading"><div><span className="eyebrow">CREATOR STUDIO / YOUR DIRECTOR’S CHAIR</span><h1>Make a world <em>worth entering.</em></h1></div><div><button className="outline" onClick={()=>openEditor()}><Plus size={16}/>New story</button><button className="outline" disabled={busy} onClick={saveStory}><Save size={16}/>Save</button><button className="primary" disabled={busy} onClick={testStory}><Play size={16}/>Test story</button></div></div><div className="studio-top"><label>STORY<select value={edit.id} onChange={e=>openEditor(stories.find(s=>s.id===e.target.value))}>{!stories.some(s=>s.id===edit.id)&&<option value={edit.id}>Unsaved story</option>}{stories.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></label><label>TITLE<input value={edit.title} onChange={e=>setEdit({...edit,title:e.target.value})}/></label><label>GENRE<select value={edit.genre} onChange={e=>setEdit({...edit,genre:e.target.value})}>{['Mystery','Sci-fi','Drama'].map(g=><option key={g}>{g}</option>)}</select></label><button className="text-button" onClick={()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(edit,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=edit.id+'.json';a.click();URL.revokeObjectURL(url);}}><Download size={16}/>Export</button><label className="import-button"><Upload size={16}/>Import<input type="file" accept="application/json" onChange={e=>{const file=e.target.files?.[0];if(file)run(async()=>{const {StorySchema}=await import('../shared/schema');const value=StorySchema.parse(JSON.parse(await file.text()));setEdit(value);setSceneId(value.start);});}}/></label></div><div className="studio-tabs">{['Scenes','Characters','Story settings'].map(t=><button key={t} className={studioTab===t?'selected':''} onClick={()=>setStudioTab(t)}>{t==='Scenes'?<GitBranch size={16}/>:t==='Characters'?<Users size={16}/>:<Settings size={16}/>} {t}</button>)}</div>
- {studioTab==='Scenes'&&<div className="editor-layout"><section className="graph-panel"><div className="panel-title">STORY FLOW <button onClick={()=>{const id='scene-'+crypto.randomUUID().slice(0,6);setEdit({...edit,scenes:[...edit.scenes,{id,title:'New scene',location:'An unfamiliar place',prose:'What happens here?',lines:[],choices:[],ending:'To be continued'}]});setSceneId(id);}}><Plus size={15}/>Add scene</button></div><div className="graph-nodes">{edit.scenes.map((n,i)=><div key={n.id} className={'graph-node '+(sceneId===n.id?'current':'')}><button onClick={()=>setSceneId(n.id)}><span className="eyebrow">{n.id===edit.start?'START':n.ending?'ENDING':'SCENE'} · {String(i+1).padStart(2,'0')}</span><h3>{n.title}</h3><small>{n.lines.length} lines · {n.choices.length} choices</small></button>{n.choices.map(c=><button className="graph-edge" onClick={()=>setSceneId(c.target)} key={c.id}><GitBranch size={12}/>{c.text.slice(0,22)} <ArrowRight size={12}/><b>{edit.scenes.find(s=>s.id===c.target)?.title??'Missing scene'}</b></button>)}</div>)}</div><p className="muted">Select a scene or follow a connection. Every target is validated on save.</p></section><section className="scene-editor"><div className="panel-title"><Film size={16}/>SCENE DETAILS <span>{editingScene.id}</span></div><label>Scene title<input value={editingScene.title} onChange={e=>updateScene({title:e.target.value})}/></label><label>Location / time<input value={editingScene.location} onChange={e=>updateScene({location:e.target.value})}/></label><label>Scene description<textarea rows={4} value={editingScene.prose} onChange={e=>updateScene({prose:e.target.value})}/></label><div className="editor-section-title">PERFORMANCE<button onClick={()=>updateScene({lines:[...editingScene.lines,{character:edit.characters[0].id,text:'A line worth remembering.',direction:'quietly'}]})}><Plus size={14}/>Add line</button></div>{editingScene.lines.map((l,i)=><div className="line-editor" key={i}><div><select aria-label="Speaker" value={l.character} onChange={e=>updateScene({lines:editingScene.lines.map((x,j)=>j===i?{...x,character:e.target.value}:x)})}>{edit.characters.map(c=><option value={c.id} key={c.id}>{c.name}</option>)}</select><button aria-label="Remove line" onClick={()=>updateScene({lines:editingScene.lines.filter((_,j)=>i!==j)})}><X size={14}/></button></div><textarea aria-label="Spoken line" rows={2} value={l.text} onChange={e=>updateScene({lines:editingScene.lines.map((x,j)=>j===i?{...x,text:e.target.value}:x)})}/><input aria-label="Performance direction" value={l.direction} onChange={e=>updateScene({lines:editingScene.lines.map((x,j)=>j===i?{...x,direction:e.target.value}:x)})}/></div>)}<div className="editor-section-title">CHOICES & CONNECTIONS<button onClick={()=>updateScene({ending:undefined,choices:[...editingScene.choices,{id:crypto.randomUUID(),text:'A new decision',target:edit.scenes.find(s=>s.id!==sceneId)?.id??sceneId,trust:{}}]})}><Plus size={14}/>Add choice</button></div>{editingScene.choices.map((c,i)=>{const change=(patch:Partial<typeof c>)=>updateScene({choices:editingScene.choices.map((x,j)=>i===j?{...x,...patch}:x)});return <div className="choice-editor" key={c.id}><div><input aria-label="Choice text" value={c.text} onChange={e=>change({text:e.target.value})}/><button aria-label="Remove choice" onClick={()=>updateScene({choices:editingScene.choices.filter((_,j)=>i!==j)})}><X size={14}/></button></div><label>Connect to<select value={c.target} onChange={e=>change({target:e.target.value})}>{edit.scenes.map(n=><option key={n.id} value={n.id}>{n.title}</option>)}</select></label><label>Discover a clue<input value={c.clue??''} onChange={e=>change({clue:e.target.value||undefined})}/></label><label>Set consequence flag<input value={c.flag??''} onChange={e=>change({flag:e.target.value||undefined})}/></label><label>Required flag<input value={c.requires??''} onChange={e=>change({requires:e.target.value||undefined})}/></label>{edit.characters.map(char=><label key={char.id}>{char.name} · trust change<input type="number" min={-50} max={50} value={c.trust[char.id]??0} onChange={e=>change({trust:{...c.trust,[char.id]:Number(e.target.value)}})}/></label>)}</div>;})}{!editingScene.choices.length&&<label>Ending title<input value={editingScene.ending??''} onChange={e=>updateScene({ending:e.target.value||undefined})}/></label>}<button className="text-button" onClick={()=>setEdit({...edit,start:sceneId})}><Check size={15}/>Make this the opening scene</button></section></div>}
- {studioTab==='Characters'&&<section className="characters-editor"><div className="editor-section-title">YOUR CAST<button className="outline" onClick={()=>setEdit({...edit,characters:[...edit.characters,{id:'character-'+crypto.randomUUID().slice(0,6),name:'New character',role:'A part to play',personality:'Describe their inner world.',voiceId:''}]})}><Plus size={16}/>Add character</button></div><div className="character-grid">{edit.characters.map((c,i)=>{const change=(p:Partial<typeof c>)=>setEdit({...edit,characters:edit.characters.map((x,j)=>i===j?{...x,...p}:x)});return <article key={c.id}><span className="speaker-avatar">{c.name[0]}</span><label>Name<input value={c.name} onChange={e=>change({name:e.target.value})}/></label><label>Role<input value={c.role} onChange={e=>change({role:e.target.value})}/></label><label>Personality & motivations<textarea rows={4} value={c.personality} onChange={e=>change({personality:e.target.value})}/></label><label>Fish Audio voice reference ID<input value={c.voiceId} onChange={e=>change({voiceId:e.target.value})} placeholder="Optional · uses default voice if empty"/></label><p className="muted">Use a saved voice ID from your Fish Audio account. Performance directions are set per dialogue line.</p></article>;})}</div></section>}
- {studioTab==='Story settings'&&<section className="story-settings"><label>Synopsis<textarea rows={4} value={edit.synopsis} onChange={e=>setEdit({...edit,synopsis:e.target.value})}/></label><label>Visual atmosphere<select value={edit.art} onChange={e=>setEdit({...edit,art:e.target.value as Story['art']})}><option value="coast">Coastal mystery</option><option value="city">Neon city</option><option value="forest">Quiet forest</option></select></label><label>Estimated play time<input value={edit.duration} onChange={e=>setEdit({...edit,duration:e.target.value})}/></label><p className="muted">Existing playthroughs keep their original story snapshot. Save and test to start a new version.</p></section>}</main>}
- </div>{busy&&<div className="working"><Loader2 size={15} className="spin"/>Working…</div>}
- {settings&&<div className="modal-backdrop" onClick={()=>setSettings(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={e=>e.stopPropagation()}><button className="modal-close" aria-label="Close settings" onClick={()=>setSettings(false)}><X size={20}/></button><span className="eyebrow">THE SOUND OF YOUR WORLD</span><h2 id="settings-title">Connections & settings</h2><div className="provider"><Headphones size={24}/><div><b>Fish Audio Drama 3</b><p>{status.fish?'API key configured · ready to request performances':'Not connected · stories are available in text mode'}</p></div><span className={status.fish?'online':'offline'}/></div><p>Add <code>FISH_API_KEY</code> to your local <code>.env</code> file and restart the server. Set <code>FISH_REFERENCE_ID</code> for a default voice, or assign voice IDs in Creator Studio.</p><div className="provider"><Clapperboard size={24}/><div><b>AI narrative director</b><p>{status.director?'Configured · custom character responses available':'Not connected · authored narrative mode'}</p></div><span className={status.director?'online':'offline'}/></div><p>For dynamic reactions, set <code>LLM_API_KEY</code>, <code>LLM_BASE_URL</code> and <code>LLM_MODEL</code>. Keys stay on your local server.</p><div className="settings-note"><Save size={17}/><p>Stories, memories and checkpoints live in your local SQLite database. Export stories from the Studio; back up the data folder to preserve playthroughs.</p></div><button className="primary" onClick={()=>run(async()=>{await refresh();setNotice('Connection configuration refreshed.');})}>Refresh status<RotateCcw size={15}/></button></section></div>}
- {history&&<div className="modal-backdrop" onClick={()=>setHistory(false)}><section className="modal history" role="dialog" aria-modal="true" aria-labelledby="history-title" onClick={e=>e.stopPropagation()}><button className="modal-close" aria-label="Close history" onClick={()=>setHistory(false)}><X size={20}/></button><span className="eyebrow">THE ROADS YOU TOOK</span><h2 id="history-title">Your branching story</h2><p>Return to any moment as a new playthrough. This branch stays exactly as you left it.</p>{checkpoints.map(c=><article key={c.id}><span className="timeline-dot"/><div><b>{session?.story.scenes.find(n=>n.id===c.state.node)?.title}</b><small>{c.label} · {c.state.memories.length} memories</small><p>{c.state.memories.at(-1)?.text??'Before the first decision'}</p></div><button className="outline small" onClick={()=>fork(c)} disabled={busy}><GitBranch size={14}/>Branch here</button></article>)}</section></div>}
- </div>;
+async function api<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
+  const res = await fetch('/api' + url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? 'Request failed');
+  }
+  return res.json();
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
+const images = {
+  coast:
+    'https://images.unsplash.com/photo-1522303225746-3037391fba31?auto=format&fit=crop&w=1800&q=85',
+  city: 'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=1000&q=85',
+  forest:
+    'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1000&q=85',
+};
+const heroImage =
+  'https://images.unsplash.com/photo-1522303225746-3037391fba31?auto=format&fit=crop&w=2000&q=85';
+function App() {
+  const [page, setPage] = useState('library'),
+    [stories, setStories] = useState<Story[]>([]),
+    [sessions, setSessions] = useState<Session[]>([]),
+    [session, setSession] = useState<Session | null>(null),
+    [status, setStatus] = useState({
+      fish: false,
+      director: false,
+      model: 'drama-3',
+    }),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState(''),
+    [busy, setBusy] = useState(false),
+    [settings, setSettings] = useState(false),
+    [filter, setFilter] = useState('All stories'),
+    [search, setSearch] = useState(''),
+    [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]),
+    [history, setHistory] = useState(false),
+    [custom, setCustom] = useState(''),
+    [playing, setPlaying] = useState<number | null>(null),
+    [audioLoading, setAudioLoading] = useState<number | null>(null),
+    [edit, setEdit] = useState<Story | null>(null),
+    [sceneId, setSceneId] = useState(''),
+    [studioTab, setStudioTab] = useState('Scenes');
+  const audio = useRef<HTMLAudioElement | null>(null),
+    audioUrl = useRef(''),
+    audioGeneration = useRef(0);
+  const refresh = async () => {
+    const [st, se, pr] = await Promise.all([
+      api<Story[]>('/stories'),
+      api<Session[]>('/sessions'),
+      api<typeof status>('/status'),
+    ]);
+    setStories(st);
+    setSessions(se);
+    setStatus(pr);
+  };
+  useEffect(() => {
+    refresh().catch((e) => setError(e.message));
+    return () => {
+      audio.current?.pause();
+      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+    };
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => setNotice(''), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
+  function stopAudio() {
+    audioGeneration.current++;
+    audio.current?.pause();
+    audio.current = null;
+    if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+    audioUrl.current = '';
+    setPlaying(null);
+    setAudioLoading(null);
+  }
+  async function run(work: () => Promise<void>) {
+    setBusy(true);
+    setError('');
+    try {
+      await work();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const start = (story: Story) =>
+    run(async () => {
+      stopAudio();
+      setSession(
+        await api<Session>('/sessions', 'POST', { storyId: story.id }),
+      );
+      setPage('player');
+      await refresh();
+    });
+  const resume = (s: Session) => {
+    stopAudio();
+    setSession(s);
+    setPage('player');
+  };
+  const choose = (id: string) =>
+    run(async () => {
+      if (!session) return;
+      stopAudio();
+      setSession(
+        await api<Session>(`/sessions/${session.id}/choices`, 'POST', {
+          version: session.version,
+          choiceId: id,
+        }),
+      );
+      setCustom('');
+      await refresh();
+    });
+  const save = () =>
+    run(async () => {
+      if (!session) return;
+      setSession(
+        await api<Session>(`/sessions/${session.id}/save`, 'POST', {
+          version: session.version,
+        }),
+      );
+      setNotice('Checkpoint saved. Your story will be here.');
+      await refresh();
+    });
+  async function playLine(i: number) {
+    if (!session) return;
+    if (playing === i) {
+      stopAudio();
+      return;
+    }
+    stopAudio();
+    const generation = audioGeneration.current;
+    setAudioLoading(i);
+    setError('');
+    try {
+      const res = await fetch(`/api/sessions/${session.id}/audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lineIndex: i, version: session.version }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const blob = await res.blob();
+      if (generation !== audioGeneration.current) return;
+      audioUrl.current = URL.createObjectURL(blob);
+      audio.current = new Audio(audioUrl.current);
+      audio.current.onended = () => setPlaying(null);
+      await audio.current.play();
+      setPlaying(i);
+    } catch (e) {
+      if (generation === audioGeneration.current)
+        setError((e as Error).message);
+    } finally {
+      if (generation === audioGeneration.current) setAudioLoading(null);
+    }
+  }
+  const showHistory = () =>
+    run(async () => {
+      if (!session) return;
+      setCheckpoints(
+        await api<Checkpoint[]>(`/sessions/${session.id}/checkpoints`),
+      );
+      setHistory(true);
+    });
+  const fork = (c: Checkpoint) =>
+    run(async () => {
+      if (!session) return;
+      stopAudio();
+      setSession(
+        await api<Session>(`/sessions/${session.id}/fork`, 'POST', {
+          checkpointId: c.id,
+        }),
+      );
+      setHistory(false);
+      setNotice('A new branch begins. Your original playthrough is preserved.');
+      await refresh();
+    });
+  const send = () =>
+    run(async () => {
+      if (!session || !custom.trim()) return;
+      stopAudio();
+      const result = await api<{ session: Session; lines: Line[] }>(
+        `/sessions/${session.id}/direct`,
+        'POST',
+        { version: session.version, text: custom },
+      );
+      setSession(result.session);
+      setCustom('');
+      await refresh();
+    });
+  const openEditor = (story?: Story) => {
+    setEdit(
+      story
+        ? structuredClone(story)
+        : {
+            id: 'story-' + crypto.randomUUID().slice(0, 8),
+            title: 'An untold story',
+            genre: 'Drama',
+            synopsis: 'Every story starts with a choice.',
+            art: 'forest',
+            duration: '10 min',
+            start: 'opening',
+            characters: [
+              {
+                id: 'character-1',
+                name: 'The stranger',
+                role: 'An unexpected arrival',
+                personality: 'Curious, guarded, quietly hopeful.',
+                voiceId: '',
+              },
+            ],
+            scenes: [
+              {
+                id: 'opening',
+                title: 'The beginning',
+                location: 'Somewhere · after midnight',
+                prose: 'Someone knocks. You were not expecting anyone.',
+                lines: [
+                  {
+                    character: 'character-1',
+                    text: 'I thought you might still be awake.',
+                    direction: 'softly, uncertain',
+                  },
+                ],
+                choices: [],
+                ending: 'To be continued',
+              },
+            ],
+          },
+    );
+    setSceneId(story?.start ?? 'opening');
+    setPage('studio');
+  };
+  const saveStory = () =>
+    run(async () => {
+      if (!edit) return;
+      const result = await api<Story>(`/stories/${edit.id}`, 'PUT', edit);
+      setEdit(result);
+      await refresh();
+      setNotice('Story validated and saved.');
+    });
+  const testStory = () =>
+    run(async () => {
+      if (!edit) return;
+      await api(`/stories/${edit.id}`, 'PUT', edit);
+      await refresh();
+      stopAudio();
+      setSession(await api<Session>('/sessions', 'POST', { storyId: edit.id }));
+      setPage('player');
+    });
+  function updateScene(patch: Partial<Story['scenes'][number]>) {
+    setEdit((s) =>
+      s
+        ? {
+            ...s,
+            scenes: s.scenes.map((n) =>
+              n.id === sceneId ? { ...n, ...patch } : n,
+            ),
+          }
+        : s,
+    );
+  }
+  const scene = session?.story.scenes.find((n) => n.id === session.state.node),
+    editingScene = edit?.scenes.find((n) => n.id === sceneId);
+  const lines = session && scene ? performanceLines(session) : [];
+  const navigate = (p: string) => {
+    stopAudio();
+    setPage(p);
+    setError('');
+  };
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <a
+          className="brand"
+          href="#"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate('library');
+          }}
+        >
+          <span className="brand-symbol">
+            t<span>v</span>
+          </span>
+          takeverse<span className="brand-dot">®</span>
+        </a>
+        <div className="workspace-label">YOUR NEXT CHAPTER</div>
+        <nav>
+          <button
+            className={page === 'library' ? 'active' : ''}
+            onClick={() => navigate('library')}
+          >
+            <Compass size={19} />
+            Discover<span>01</span>
+          </button>
+          <button
+            className={page === 'saves' ? 'active' : ''}
+            onClick={() => navigate('saves')}
+          >
+            <BookOpen size={19} />
+            My stories<span>{sessions.length.toString().padStart(2, '0')}</span>
+          </button>
+          <button
+            className={page === 'studio' ? 'active' : ''}
+            onClick={() => openEditor(stories.find((s) => s.id === edit?.id))}
+          >
+            <Clapperboard size={19} />
+            Creator Studio
+            <ArrowUpRight size={15} />
+          </button>
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="sound-card">
+            <div className="sound-wave">▂ ▅ ▃ █ ▅ ▂ ▆ ▃</div>
+            <b>Made to be heard.</b>
+            <p>
+              Every voice. Every silence.
+              <br />
+              Part of your story.
+            </p>
+            <span>POWERED BY FISH AUDIO</span>
+          </div>
+          <button className="settings" onClick={() => setSettings(true)}>
+            <Settings size={18} />
+            Settings & connections
+          </button>
+          <div className="profile">
+            <span className="avatar">N</span>
+            <div>
+              My workspace<small>Local storyteller</small>
+            </div>
+            <span className="online" />
+          </div>
+        </div>
+      </aside>
+      <div className="main">
+        <header className="topbar">
+          <div>
+            <span className="breadcrumb">THE INTERACTIVE STORY ENGINE</span>
+            <span className="header-divider" />
+            Your choices leave a mark.
+          </div>
+          <button className="connection" onClick={() => setSettings(true)}>
+            <span className={status.fish ? 'online' : 'offline'} />
+            {status.fish ? 'Fish Audio connected' : 'Connect Fish Audio'}
+            <ArrowUpRight size={13} />
+          </button>
+        </header>
+        {error && (
+          <div className="alert" role="alert">
+            <span>{error}</span>
+            <button onClick={() => setError('')} aria-label="Dismiss error">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+        {notice && (
+          <div className="toast" role="status">
+            <Check size={16} />
+            {notice}
+          </div>
+        )}
+        {page === 'library' && (
+          <main className="library">
+            <div className="page-heading">
+              <div>
+                <span className="eyebrow">A WORLD BEYOND WATCHING</span>
+                <h1>
+                  Find your next <em>what if.</em>
+                </h1>
+                <p>Step inside a story. Change what happens next.</p>
+              </div>
+              <span className="edition">
+                THE TAKEVERSE COLLECTION
+                <br />
+                <b>VOL. 001 — OCTOBER 2026</b>
+              </span>
+            </div>
+            <section
+              className="hero"
+              style={{
+                backgroundImage: `linear-gradient(90deg,rgba(7,17,17,.9),rgba(7,17,17,.3)),linear-gradient(0deg,#071111aa,transparent),url(${heroImage})`,
+              }}
+            >
+              <div className="hero-top">
+                <span className="pill">
+                  <span />
+                  THE FEATURED EXPERIENCE
+                </span>
+                <span className="hero-number">01 / 03</span>
+              </div>
+              <div className="hero-content">
+                <div className="hero-meta">
+                  MYSTERY <i /> CHOICE-DRIVEN <i /> 3 ENDINGS
+                </div>
+                <h2>
+                  The Last
+                  <br />
+                  <em>Light</em>
+                  <span>.</span>
+                </h2>
+                <p>
+                  The lighthouse went dark seven years ago.
+                  <br />
+                  Tonight, it’s calling your name.
+                </p>
+                <div className="hero-actions">
+                  <button
+                    className="primary"
+                    disabled={busy || !stories[0]}
+                    onClick={() => start(stories[0])}
+                  >
+                    <Play size={15} fill="currentColor" />
+                    Enter the story
+                    <ArrowUpRight size={17} />
+                  </button>
+                  <span>
+                    <Headphones size={16} /> Best experienced with headphones
+                  </span>
+                </div>
+              </div>
+              <div className="hero-bottom">
+                <span>BLACKWATER COAST · 11:32 PM</span>
+                <span>
+                  AN ORIGINAL TAKEVERSE STORY <ArrowUpRight size={14} />
+                </span>
+              </div>
+              <div className="vertical-caption">EVERY TRUTH CASTS A SHADOW</div>
+            </section>
+            <div className="collection-heading">
+              <div>
+                <span className="eyebrow">NOT JUST A STORY. YOUR STORY.</span>
+                <h2>
+                  Worlds waiting for you
+                  <span> {stories.length.toString().padStart(2, '0')}</span>
+                </h2>
+              </div>
+              <label className="search">
+                <Search size={16} />
+                <input
+                  aria-label="Search stories"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Find a story"
+                />
+              </label>
+            </div>
+            <div className="filters">
+              {['All stories', 'Mystery', 'Sci-fi', 'Drama'].map((f) => (
+                <button
+                  key={f}
+                  className={filter === f ? 'selected' : ''}
+                  onClick={() => setFilter(f)}
+                >
+                  {f}
+                </button>
+              ))}
+              <span>
+                <GitBranch size={14} />
+                One decision. A different world.
+              </span>
+            </div>
+            <div className="story-grid">
+              {stories
+                .filter(
+                  (s) =>
+                    (filter === 'All stories' || s.genre === filter) &&
+                    `${s.title} ${s.synopsis}`
+                      .toLowerCase()
+                      .includes(search.toLowerCase()),
+                )
+                .map((s, i) => (
+                  <article className="story-card" key={s.id}>
+                    <button
+                      className={'cover ' + s.art}
+                      onClick={() => start(s)}
+                      disabled={busy}
+                      style={{
+                        backgroundImage: `linear-gradient(0deg,rgba(0,0,0,.8),transparent 80%),url(${images[s.art]})`,
+                      }}
+                      aria-label={'Play ' + s.title}
+                    >
+                      <span className="cover-tag">{s.genre.toUpperCase()}</span>
+                      <span className="cover-index">0{i + 1}</span>
+                      <h3>{s.title}</h3>
+                      <span className="cover-play">
+                        <Play size={18} fill="currentColor" />
+                      </span>
+                    </button>
+                    <div className="card-meta">
+                      <span>
+                        <Clock size={13} />
+                        {s.duration}
+                      </span>
+                      <span>
+                        <GitBranch size={13} />
+                        {s.scenes.filter((n) => n.ending).length} endings
+                      </span>
+                      <button
+                        onClick={() => openEditor(s)}
+                        aria-label={'Edit ' + s.title}
+                      >
+                        <ArrowUpRight size={17} />
+                      </button>
+                    </div>
+                    <p>{s.synopsis}</p>
+                  </article>
+                ))}
+            </div>
+            {stories.filter(
+              (s) =>
+                (filter === 'All stories' || s.genre === filter) &&
+                `${s.title} ${s.synopsis}`
+                  .toLowerCase()
+                  .includes(search.toLowerCase()),
+            ).length === 0 && (
+              <p className="empty">
+                No stories here yet. Try another search, or create your own.
+              </p>
+            )}
+            <section className="create-banner">
+              <span className="banner-icon">
+                <Clapperboard size={30} />
+              </span>
+              <div>
+                <span className="eyebrow">FROM WHAT IF TO WHAT’S NEXT</span>
+                <h3>Some worlds are waiting to be written.</h3>
+                <p>
+                  Build characters, direct their voices, and make every choice
+                  matter.
+                </p>
+              </div>
+              <button className="outline" onClick={() => openEditor()}>
+                Open Creator Studio
+                <ArrowUpRight size={16} />
+              </button>
+            </section>
+            <footer>
+              <span>TAKEVERSE © 2026</span>
+              <span>THE STORY ONLY EXISTS BECAUSE YOU’RE HERE.</span>
+              <span>IMAGINE. CHOOSE. BECOME.</span>
+            </footer>
+          </main>
+        )}
+        {page === 'player' && session && scene && (
+          <main className="player">
+            <div className="player-toolbar">
+              <button
+                className="text-button"
+                onClick={() => navigate('library')}
+              >
+                <ChevronLeft size={16} />
+                Story library
+              </button>
+              <span>
+                {session.story.title} <i>/</i> Chapter{' '}
+                {session.state.memories.length + 1}
+              </span>
+              <div>
+                <button
+                  className="outline small"
+                  onClick={showHistory}
+                  disabled={busy}
+                >
+                  <GitBranch size={15} />
+                  Your path
+                </button>
+                <button
+                  className="outline small"
+                  onClick={save}
+                  disabled={busy}
+                >
+                  <Bookmark size={15} />
+                  Save
+                </button>
+              </div>
+            </div>
+            <section
+              className={'scene-visual ' + session.story.art}
+              style={{
+                backgroundImage: `linear-gradient(0deg,#111510,transparent 95%),url(${images[session.story.art]})`,
+              }}
+            >
+              <div>
+                <span className="eyebrow">{scene.location.toUpperCase()}</span>
+                <h1>
+                  {scene.title}
+                  <em>.</em>
+                </h1>
+                <span className="pill">
+                  {scene.ending
+                    ? 'THE FINAL CHAPTER'
+                    : 'YOU ARE PART OF THIS STORY'}
+                </span>
+              </div>
+            </section>
+            <div className="play-layout">
+              <section className="narrative">
+                <p className="prose">{scene.prose}</p>
+                {session.state.memories.length > 0 && (
+                  <div className="remembered">
+                    <span className="online" />
+                    Your choices are remembered: “
+                    {session.state.memories.at(-1)?.text}”
+                  </div>
+                )}
+                <div className="dialogue">
+                  {lines.map((l, i) => (
+                    <article key={session.state.node + '-' + i}>
+                      <div className="speaker-avatar">
+                        {
+                          session.story.characters.find(
+                            (c) => c.id === l.character,
+                          )?.name[0]
+                        }
+                      </div>
+                      <div>
+                        <h4>
+                          {
+                            session.story.characters.find(
+                              (c) => c.id === l.character,
+                            )?.name
+                          }
+                          <span>{l.direction}</span>
+                        </h4>
+                        <p>“{l.text}”</p>
+                      </div>
+                      <button
+                        className="audio-button"
+                        aria-label={`Play dialogue ${i + 1}`}
+                        onClick={() => playLine(i)}
+                        disabled={audioLoading !== null}
+                      >
+                        {audioLoading === i ? (
+                          <Loader2 size={18} className="spin" />
+                        ) : playing === i ? (
+                          <Pause size={18} />
+                        ) : (
+                          <Volume2 size={18} />
+                        )}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+                <div className="audio-note">
+                  <Headphones size={13} />
+                  {status.fish
+                    ? 'Drama 3 · Generate a performance with the speaker button'
+                    : 'Text mode · Connect Fish Audio in Settings for voice performances'}
+                </div>
+                {scene.ending ? (
+                  <div className="ending">
+                    <span className="eyebrow">YOU REACHED AN ENDING</span>
+                    <h2>{scene.ending}</h2>
+                    <p>
+                      Every ending is a door to another version of the story.
+                    </p>
+                    <button className="primary" onClick={showHistory}>
+                      <RotateCcw size={16} />
+                      Explore another path
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="choice-label">
+                      <span className="eyebrow">WHAT DO YOU DO?</span>
+                      <span>Take your time. This matters.</span>
+                    </div>
+                    <div className="choices">
+                      {scene.choices.map((c, i) => (
+                        <button
+                          key={c.id}
+                          disabled={busy || !available(session.state, c)}
+                          onClick={() => choose(c.id)}
+                        >
+                          <span>0{i + 1}</span>
+                          <div>
+                            {c.text}
+                            {!available(session.state, c) && (
+                              <small>
+                                {c.requires
+                                  ? 'Requires an earlier discovery'
+                                  : 'Requires greater trust'}
+                              </small>
+                            )}
+                          </div>
+                          <ArrowUpRight size={18} />
+                        </button>
+                      ))}
+                    </div>
+                    <form
+                      className="custom-response"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        send();
+                      }}
+                    >
+                      <input
+                        value={custom}
+                        onChange={(e) => setCustom(e.target.value)}
+                        maxLength={1000}
+                        placeholder={
+                          status.director
+                            ? 'Or say something in your own words…'
+                            : 'Custom responses require an AI director connection'
+                        }
+                        aria-label="Custom response"
+                        disabled={!status.director || busy}
+                      />
+                      <button
+                        aria-label="Send custom response"
+                        disabled={!custom.trim() || busy || !status.director}
+                      >
+                        <Send size={17} />
+                      </button>
+                    </form>
+                  </>
+                )}
+              </section>
+              <aside className="world-panel">
+                <div className="panel-title">
+                  <Users size={16} />
+                  THE PEOPLE AROUND YOU
+                </div>
+                {session.story.characters.map((c) => (
+                  <div className="relationship" key={c.id}>
+                    <div>
+                      <span className="speaker-avatar">{c.name[0]}</span>
+                      <div>
+                        <b>{c.name}</b>
+                        <small>{c.role}</small>
+                      </div>
+                    </div>
+                    <div className="trust-meta">
+                      <span>
+                        {session.state.trust[c.id] >= 65
+                          ? 'Trusting'
+                          : session.state.trust[c.id] < 40
+                            ? 'Guarded'
+                            : 'Uncertain'}
+                      </span>
+                      <span>{session.state.trust[c.id]} / 100</span>
+                    </div>
+                    <div className="trust-track">
+                      <span
+                        style={{ width: session.state.trust[c.id] + '%' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+                <div className="panel-title">
+                  <Search size={15} />
+                  YOUR DISCOVERIES
+                </div>
+                {session.state.clues.length ? (
+                  session.state.clues.map((c) => (
+                    <p className="clue" key={c}>
+                      <Check size={14} />
+                      {c}
+                    </p>
+                  ))
+                ) : (
+                  <p className="muted">
+                    Some things are still waiting to be found.
+                  </p>
+                )}
+                <div className="panel-title">
+                  <GitBranch size={15} />
+                  WORLD MEMORY
+                </div>
+                <p className="muted">
+                  {session.state.memories.length} remembered interactions ·{' '}
+                  {session.state.flags.length} consequences
+                </p>
+                <span className="local-badge">
+                  <span className="online" />
+                  Autosaved locally
+                </span>
+              </aside>
+            </div>
+          </main>
+        )}
+        {page === 'saves' && (
+          <main className="library">
+            <span className="eyebrow">EVERY PATH IS YOURS</span>
+            <h1>
+              Your stories, <em>unfinished.</em>
+            </h1>
+            <p className="subtitle">
+              Pick up where you left off. Each branch has its own memory.
+            </p>
+            <div className="save-list">
+              {sessions.map((s) => (
+                <article key={s.id}>
+                  <div
+                    className={'save-art ' + s.story.art}
+                    style={{ backgroundImage: `url(${images[s.story.art]})` }}
+                  />
+                  <div>
+                    <span className="eyebrow">
+                      {s.story.genre} ·{' '}
+                      {s.story.scenes.find((n) => n.id === s.state.node)?.ending
+                        ? 'COMPLETED'
+                        : 'IN PROGRESS'}
+                    </span>
+                    <h2>{s.story.title}</h2>
+                    <p>
+                      {s.story.scenes.find((n) => n.id === s.state.node)?.title}{' '}
+                      · {s.state.memories.length} memories
+                    </p>
+                    <small>
+                      {new Date(s.updated).toLocaleString()} · Branch{' '}
+                      {s.id.slice(0, 8)}
+                    </small>
+                  </div>
+                  <button className="primary" onClick={() => resume(s)}>
+                    Resume
+                    <ArrowRight size={16} />
+                  </button>
+                </article>
+              ))}
+            </div>
+            {!sessions.length && (
+              <div className="empty">
+                <BookOpen size={36} />
+                <h2>Your first chapter is waiting.</h2>
+                <p>
+                  Start a story from the library. Every decision is saved
+                  automatically.
+                </p>
+                <button className="primary" onClick={() => navigate('library')}>
+                  Discover stories
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            )}
+          </main>
+        )}
+        {page === 'studio' && edit && editingScene && (
+          <main className="studio">
+            <div className="studio-heading">
+              <div>
+                <span className="eyebrow">
+                  CREATOR STUDIO / YOUR DIRECTOR’S CHAIR
+                </span>
+                <h1>
+                  Make a world <em>worth entering.</em>
+                </h1>
+              </div>
+              <div>
+                <button className="outline" onClick={() => openEditor()}>
+                  <Plus size={16} />
+                  New story
+                </button>
+                <button className="outline" disabled={busy} onClick={saveStory}>
+                  <Save size={16} />
+                  Save
+                </button>
+                <button className="primary" disabled={busy} onClick={testStory}>
+                  <Play size={16} />
+                  Test story
+                </button>
+              </div>
+            </div>
+            <div className="studio-top">
+              <label>
+                STORY
+                <select
+                  value={edit.id}
+                  onChange={(e) =>
+                    openEditor(stories.find((s) => s.id === e.target.value))
+                  }
+                >
+                  {!stories.some((s) => s.id === edit.id) && (
+                    <option value={edit.id}>Unsaved story</option>
+                  )}
+                  {stories.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                TITLE
+                <input
+                  value={edit.title}
+                  onChange={(e) => setEdit({ ...edit, title: e.target.value })}
+                />
+              </label>
+              <label>
+                GENRE
+                <select
+                  value={edit.genre}
+                  onChange={(e) => setEdit({ ...edit, genre: e.target.value })}
+                >
+                  {['Mystery', 'Sci-fi', 'Drama'].map((g) => (
+                    <option key={g}>{g}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="text-button"
+                onClick={() => {
+                  const url = URL.createObjectURL(
+                    new Blob([JSON.stringify(edit, null, 2)], {
+                      type: 'application/json',
+                    }),
+                  );
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = edit.id + '.json';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                <Download size={16} />
+                Export
+              </button>
+              <label className="import-button">
+                <Upload size={16} />
+                Import
+                <input
+                  type="file"
+                  accept="application/json"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file)
+                      run(async () => {
+                        const { StorySchema } =
+                          await import('../shared/schema');
+                        const value = StorySchema.parse(
+                          JSON.parse(await file.text()),
+                        );
+                        setEdit(value);
+                        setSceneId(value.start);
+                      });
+                  }}
+                />
+              </label>
+            </div>
+            <div className="studio-tabs">
+              {['Scenes', 'Characters', 'Story settings'].map((t) => (
+                <button
+                  key={t}
+                  className={studioTab === t ? 'selected' : ''}
+                  onClick={() => setStudioTab(t)}
+                >
+                  {t === 'Scenes' ? (
+                    <GitBranch size={16} />
+                  ) : t === 'Characters' ? (
+                    <Users size={16} />
+                  ) : (
+                    <Settings size={16} />
+                  )}{' '}
+                  {t}
+                </button>
+              ))}
+            </div>
+            {studioTab === 'Scenes' && (
+              <div className="editor-layout">
+                <section className="graph-panel">
+                  <div className="panel-title">
+                    STORY FLOW{' '}
+                    <button
+                      onClick={() => {
+                        const id = 'scene-' + crypto.randomUUID().slice(0, 6);
+                        setEdit({
+                          ...edit,
+                          scenes: [
+                            ...edit.scenes,
+                            {
+                              id,
+                              title: 'New scene',
+                              location: 'An unfamiliar place',
+                              prose: 'What happens here?',
+                              lines: [],
+                              choices: [],
+                              ending: 'To be continued',
+                            },
+                          ],
+                        });
+                        setSceneId(id);
+                      }}
+                    >
+                      <Plus size={15} />
+                      Add scene
+                    </button>
+                  </div>
+                  <div className="graph-nodes">
+                    {edit.scenes.map((n, i) => (
+                      <div
+                        key={n.id}
+                        className={
+                          'graph-node ' + (sceneId === n.id ? 'current' : '')
+                        }
+                      >
+                        <button onClick={() => setSceneId(n.id)}>
+                          <span className="eyebrow">
+                            {n.id === edit.start
+                              ? 'START'
+                              : n.ending
+                                ? 'ENDING'
+                                : 'SCENE'}{' '}
+                            · {String(i + 1).padStart(2, '0')}
+                          </span>
+                          <h3>{n.title}</h3>
+                          <small>
+                            {n.lines.length} lines · {n.choices.length} choices
+                          </small>
+                        </button>
+                        {n.choices.map((c) => (
+                          <button
+                            className="graph-edge"
+                            onClick={() => setSceneId(c.target)}
+                            key={c.id}
+                          >
+                            <GitBranch size={12} />
+                            {c.text.slice(0, 22)} <ArrowRight size={12} />
+                            <b>
+                              {edit.scenes.find((s) => s.id === c.target)
+                                ?.title ?? 'Missing scene'}
+                            </b>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="muted">
+                    Select a scene or follow a connection. Every target is
+                    validated on save.
+                  </p>
+                </section>
+                <section className="scene-editor">
+                  <div className="panel-title">
+                    <Film size={16} />
+                    SCENE DETAILS <span>{editingScene.id}</span>
+                  </div>
+                  <label>
+                    Scene title
+                    <input
+                      value={editingScene.title}
+                      onChange={(e) => updateScene({ title: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Location / time
+                    <input
+                      value={editingScene.location}
+                      onChange={(e) =>
+                        updateScene({ location: e.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Scene description
+                    <textarea
+                      rows={4}
+                      value={editingScene.prose}
+                      onChange={(e) => updateScene({ prose: e.target.value })}
+                    />
+                  </label>
+                  <div className="editor-section-title">
+                    PERFORMANCE
+                    <button
+                      onClick={() =>
+                        updateScene({
+                          lines: [
+                            ...editingScene.lines,
+                            {
+                              character: edit.characters[0].id,
+                              text: 'A line worth remembering.',
+                              direction: 'quietly',
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      <Plus size={14} />
+                      Add line
+                    </button>
+                  </div>
+                  {editingScene.lines.map((l, i) => (
+                    <div className="line-editor" key={i}>
+                      <div>
+                        <select
+                          aria-label="Speaker"
+                          value={l.character}
+                          onChange={(e) =>
+                            updateScene({
+                              lines: editingScene.lines.map((x, j) =>
+                                j === i
+                                  ? { ...x, character: e.target.value }
+                                  : x,
+                              ),
+                            })
+                          }
+                        >
+                          {edit.characters.map((c) => (
+                            <option value={c.id} key={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          aria-label="Remove line"
+                          onClick={() =>
+                            updateScene({
+                              lines: editingScene.lines.filter(
+                                (_, j) => i !== j,
+                              ),
+                            })
+                          }
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <textarea
+                        aria-label="Spoken line"
+                        rows={2}
+                        value={l.text}
+                        onChange={(e) =>
+                          updateScene({
+                            lines: editingScene.lines.map((x, j) =>
+                              j === i ? { ...x, text: e.target.value } : x,
+                            ),
+                          })
+                        }
+                      />
+                      <input
+                        aria-label="Performance direction"
+                        value={l.direction}
+                        onChange={(e) =>
+                          updateScene({
+                            lines: editingScene.lines.map((x, j) =>
+                              j === i ? { ...x, direction: e.target.value } : x,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                  <div className="editor-section-title">
+                    CHOICES & CONNECTIONS
+                    <button
+                      onClick={() =>
+                        updateScene({
+                          ending: undefined,
+                          choices: [
+                            ...editingScene.choices,
+                            {
+                              id: crypto.randomUUID(),
+                              text: 'A new decision',
+                              target:
+                                edit.scenes.find((s) => s.id !== sceneId)?.id ??
+                                sceneId,
+                              trust: {},
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      <Plus size={14} />
+                      Add choice
+                    </button>
+                  </div>
+                  {editingScene.choices.map((c, i) => {
+                    const change = (patch: Partial<typeof c>) =>
+                      updateScene({
+                        choices: editingScene.choices.map((x, j) =>
+                          i === j ? { ...x, ...patch } : x,
+                        ),
+                      });
+                    return (
+                      <div className="choice-editor" key={c.id}>
+                        <div>
+                          <input
+                            aria-label="Choice text"
+                            value={c.text}
+                            onChange={(e) => change({ text: e.target.value })}
+                          />
+                          <button
+                            aria-label="Remove choice"
+                            onClick={() =>
+                              updateScene({
+                                choices: editingScene.choices.filter(
+                                  (_, j) => i !== j,
+                                ),
+                              })
+                            }
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        <label>
+                          Connect to
+                          <select
+                            value={c.target}
+                            onChange={(e) => change({ target: e.target.value })}
+                          >
+                            {edit.scenes.map((n) => (
+                              <option key={n.id} value={n.id}>
+                                {n.title}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Discover a clue
+                          <input
+                            value={c.clue ?? ''}
+                            onChange={(e) =>
+                              change({ clue: e.target.value || undefined })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Set consequence flag
+                          <input
+                            value={c.flag ?? ''}
+                            onChange={(e) =>
+                              change({ flag: e.target.value || undefined })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Required flag
+                          <input
+                            value={c.requires ?? ''}
+                            onChange={(e) =>
+                              change({ requires: e.target.value || undefined })
+                            }
+                          />
+                        </label>
+                        {edit.characters.map((char) => (
+                          <label key={char.id}>
+                            {char.name} · trust change
+                            <input
+                              type="number"
+                              min={-50}
+                              max={50}
+                              value={c.trust[char.id] ?? 0}
+                              onChange={(e) =>
+                                change({
+                                  trust: {
+                                    ...c.trust,
+                                    [char.id]: Number(e.target.value),
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {!editingScene.choices.length && (
+                    <label>
+                      Ending title
+                      <input
+                        value={editingScene.ending ?? ''}
+                        onChange={(e) =>
+                          updateScene({ ending: e.target.value || undefined })
+                        }
+                      />
+                    </label>
+                  )}
+                  <button
+                    className="text-button"
+                    onClick={() => setEdit({ ...edit, start: sceneId })}
+                  >
+                    <Check size={15} />
+                    Make this the opening scene
+                  </button>
+                </section>
+              </div>
+            )}
+            {studioTab === 'Characters' && (
+              <section className="characters-editor">
+                <div className="editor-section-title">
+                  YOUR CAST
+                  <button
+                    className="outline"
+                    onClick={() =>
+                      setEdit({
+                        ...edit,
+                        characters: [
+                          ...edit.characters,
+                          {
+                            id: 'character-' + crypto.randomUUID().slice(0, 6),
+                            name: 'New character',
+                            role: 'A part to play',
+                            personality: 'Describe their inner world.',
+                            voiceId: '',
+                          },
+                        ],
+                      })
+                    }
+                  >
+                    <Plus size={16} />
+                    Add character
+                  </button>
+                </div>
+                <div className="character-grid">
+                  {edit.characters.map((c, i) => {
+                    const change = (p: Partial<typeof c>) =>
+                      setEdit({
+                        ...edit,
+                        characters: edit.characters.map((x, j) =>
+                          i === j ? { ...x, ...p } : x,
+                        ),
+                      });
+                    return (
+                      <article key={c.id}>
+                        <span className="speaker-avatar">{c.name[0]}</span>
+                        <label>
+                          Name
+                          <input
+                            value={c.name}
+                            onChange={(e) => change({ name: e.target.value })}
+                          />
+                        </label>
+                        <label>
+                          Role
+                          <input
+                            value={c.role}
+                            onChange={(e) => change({ role: e.target.value })}
+                          />
+                        </label>
+                        <label>
+                          Personality & motivations
+                          <textarea
+                            rows={4}
+                            value={c.personality}
+                            onChange={(e) =>
+                              change({ personality: e.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Fish Audio voice reference ID
+                          <input
+                            value={c.voiceId}
+                            onChange={(e) =>
+                              change({ voiceId: e.target.value })
+                            }
+                            placeholder="Optional · uses default voice if empty"
+                          />
+                        </label>
+                        <p className="muted">
+                          Use a saved voice ID from your Fish Audio account.
+                          Performance directions are set per dialogue line.
+                        </p>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+            {studioTab === 'Story settings' && (
+              <section className="story-settings">
+                <label>
+                  Synopsis
+                  <textarea
+                    rows={4}
+                    value={edit.synopsis}
+                    onChange={(e) =>
+                      setEdit({ ...edit, synopsis: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Visual atmosphere
+                  <select
+                    value={edit.art}
+                    onChange={(e) =>
+                      setEdit({ ...edit, art: e.target.value as Story['art'] })
+                    }
+                  >
+                    <option value="coast">Coastal mystery</option>
+                    <option value="city">Neon city</option>
+                    <option value="forest">Quiet forest</option>
+                  </select>
+                </label>
+                <label>
+                  Estimated play time
+                  <input
+                    value={edit.duration}
+                    onChange={(e) =>
+                      setEdit({ ...edit, duration: e.target.value })
+                    }
+                  />
+                </label>
+                <p className="muted">
+                  Existing playthroughs keep their original story snapshot. Save
+                  and test to start a new version.
+                </p>
+              </section>
+            )}
+          </main>
+        )}
+      </div>
+      {busy && (
+        <div className="working">
+          <Loader2 size={15} className="spin" />
+          Working…
+        </div>
+      )}
+      {settings && (
+        <div className="modal-backdrop" onClick={() => setSettings(false)}>
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              aria-label="Close settings"
+              onClick={() => setSettings(false)}
+            >
+              <X size={20} />
+            </button>
+            <span className="eyebrow">THE SOUND OF YOUR WORLD</span>
+            <h2 id="settings-title">Connections & settings</h2>
+            <div className="provider">
+              <Headphones size={24} />
+              <div>
+                <b>Fish Audio Drama 3</b>
+                <p>
+                  {status.fish
+                    ? 'API key configured · ready to request performances'
+                    : 'Not connected · stories are available in text mode'}
+                </p>
+              </div>
+              <span className={status.fish ? 'online' : 'offline'} />
+            </div>
+            <p>
+              Add <code>FISH_API_KEY</code> to your local <code>.env</code> file
+              and restart the server. Set <code>FISH_REFERENCE_ID</code> for a
+              default voice, or assign voice IDs in Creator Studio.
+            </p>
+            <div className="provider">
+              <Clapperboard size={24} />
+              <div>
+                <b>AI narrative director</b>
+                <p>
+                  {status.director
+                    ? 'Configured · custom character responses available'
+                    : 'Not connected · authored narrative mode'}
+                </p>
+              </div>
+              <span className={status.director ? 'online' : 'offline'} />
+            </div>
+            <p>
+              For dynamic reactions, set <code>LLM_API_KEY</code>,{' '}
+              <code>LLM_BASE_URL</code> and <code>LLM_MODEL</code>. Keys stay on
+              your local server.
+            </p>
+            <div className="settings-note">
+              <Save size={17} />
+              <p>
+                Stories, memories and checkpoints live in your local SQLite
+                database. Export stories from the Studio; back up the data
+                folder to preserve playthroughs.
+              </p>
+            </div>
+            <button
+              className="primary"
+              onClick={() =>
+                run(async () => {
+                  await refresh();
+                  setNotice('Connection configuration refreshed.');
+                })
+              }
+            >
+              Refresh status
+              <RotateCcw size={15} />
+            </button>
+          </section>
+        </div>
+      )}
+      {history && (
+        <div className="modal-backdrop" onClick={() => setHistory(false)}>
+          <section
+            className="modal history"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              aria-label="Close history"
+              onClick={() => setHistory(false)}
+            >
+              <X size={20} />
+            </button>
+            <span className="eyebrow">THE ROADS YOU TOOK</span>
+            <h2 id="history-title">Your branching story</h2>
+            <p>
+              Return to any moment as a new playthrough. This branch stays
+              exactly as you left it.
+            </p>
+            {checkpoints.map((c) => (
+              <article key={c.id}>
+                <span className="timeline-dot" />
+                <div>
+                  <b>
+                    {
+                      session?.story.scenes.find((n) => n.id === c.state.node)
+                        ?.title
+                    }
+                  </b>
+                  <small>
+                    {c.label} · {c.state.memories.length} memories
+                  </small>
+                  <p>
+                    {c.state.memories.at(-1)?.text ??
+                      'Before the first decision'}
+                  </p>
+                </div>
+                <button
+                  className="outline small"
+                  onClick={() => fork(c)}
+                  disabled={busy}
+                >
+                  <GitBranch size={14} />
+                  Branch here
+                </button>
+              </article>
+            ))}
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
