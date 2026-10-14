@@ -100,6 +100,41 @@ function App() {
     const t = setTimeout(() => setNotice(''), 3500);
     return () => clearTimeout(t);
   }, [notice]);
+  useEffect(() => {
+    if (!settings && !history) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    dialog?.querySelector<HTMLElement>('button')?.focus();
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSettings(false);
+        setHistory(false);
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const items = [
+        ...dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled),a[href],input:not(:disabled),select,textarea,[tabindex="0"]',
+        ),
+      ];
+      const first = items[0],
+        last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener('keydown', handle);
+    return () => {
+      document.removeEventListener('keydown', handle);
+      previous?.focus();
+    };
+  }, [settings, history]);
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [page, session?.state.node]);
   function stopAudio() {
     audioGeneration.current++;
     audio.current?.pause();
@@ -282,6 +317,7 @@ function App() {
       stopAudio();
       setSession(await api<Session>('/sessions', 'POST', { storyId: edit.id }));
       setPage('player');
+      await refresh();
     });
   function updateScene(patch: Partial<Story['scenes'][number]>) {
     setEdit((s) =>
@@ -337,7 +373,7 @@ function App() {
           </button>
           <button
             className={page === 'studio' ? 'active' : ''}
-            onClick={() => openEditor(stories.find((s) => s.id === edit?.id))}
+            onClick={() => (edit ? navigate('studio') : openEditor())}
           >
             <Clapperboard size={19} />
             Creator Studio
@@ -1173,6 +1209,25 @@ function App() {
                           })
                         }
                       />
+                      <label>
+                        Only speak after consequence flag (optional)
+                        <input
+                          aria-label="Dialogue prerequisite flag"
+                          value={l.whenFlag ?? ''}
+                          onChange={(e) =>
+                            updateScene({
+                              lines: editingScene.lines.map((x, j) =>
+                                j === i
+                                  ? {
+                                      ...x,
+                                      whenFlag: e.target.value || undefined,
+                                    }
+                                  : x,
+                              ),
+                            })
+                          }
+                        />
+                      </label>
                     </div>
                   ))}
                   <div className="editor-section-title">
@@ -1267,6 +1322,45 @@ function App() {
                             }
                           />
                         </label>
+                        <label>
+                          Relationship prerequisite
+                          <select
+                            value={c.minTrust?.character ?? ''}
+                            onChange={(e) =>
+                              change({
+                                minTrust: e.target.value
+                                  ? { character: e.target.value, value: 60 }
+                                  : undefined,
+                              })
+                            }
+                          >
+                            <option value="">No trust requirement</option>
+                            {edit.characters.map((char) => (
+                              <option key={char.id} value={char.id}>
+                                {char.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {c.minTrust && (
+                          <label>
+                            Minimum trust (0–100)
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={c.minTrust.value}
+                              onChange={(e) =>
+                                change({
+                                  minTrust: {
+                                    character: c.minTrust!.character,
+                                    value: Number(e.target.value),
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                        )}
                         {edit.characters.map((char) => (
                           <label key={char.id}>
                             {char.name} · trust change

@@ -20,7 +20,9 @@ export const ChoiceSchema = z.object({
   clue: z.string().optional(),
   flag: z.string().optional(),
   requires: z.string().optional(),
-  minTrust: z.object({ character: z.string(), value: z.number() }).optional(),
+  minTrust: z
+    .object({ character: z.string(), value: z.number().int().min(0).max(100) })
+    .optional(),
 });
 export const SceneSchema = z.object({
   id: z.string().min(1),
@@ -55,6 +57,8 @@ export const StorySchema = z
         fail('Choice IDs must be unique within a scene');
       if (!n.ending && !n.choices.length)
         fail(`${n.id}: add choices or an ending`);
+      if (n.ending && n.choices.length)
+        fail(`${n.id}: an ending cannot also have choices`);
       for (const l of n.lines)
         if (!cast.has(l.character)) fail(`Unknown speaker ${l.character}`);
       for (const c of n.choices) {
